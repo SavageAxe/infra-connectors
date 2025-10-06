@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "infra-connectors"
+version = "0.1.0"
+description = "Async helpers that wrap Argo CD, Git providers, and Vault APIs."
+readme = "README.md"
+authors = [
+    { name = "Yehonatan Magen" },
+    { name = "Alon Elimelech" },
+]
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.24",
+    "loguru>=0.7",
+    "pyyaml>=6.0.3",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["infra_connectors*"]
