@@ -12,13 +12,13 @@
 ## Installation
 
 ```bash
-pip install infra-connectors
+pip install horizon-infra-connectors
 ```
 
 ## Usage
 
 ```python
-from infra_connectors import ArgoCD, Git, Vault
+from horizon_infra_connectors import ArgoCD, Git, Vault
 
 argo = ArgoCD(
     base_url="https://argo.example.com",
@@ -41,7 +41,7 @@ Each service exposes an underlying API client when you need lower-level control:
 
 ```python
 import asyncio
-from infra_connectors.argocd import ArgoCDAPI
+from horizon_infra_connectors.argocd import ArgoCDAPI
 
 async def main() -> None:
     api = ArgoCDAPI(base_url="https://argo.example.com", api_key="token")
