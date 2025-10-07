@@ -1,4 +1,4 @@
-"""Public interface for the :mod:`infra_connectors` package."""
+"""Public interface for the :mod:`horizon_infra_connectors` package."""
 
 from .argocd import ArgoCD
 from .git import Git
