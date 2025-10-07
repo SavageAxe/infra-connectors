@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict
 
-from ..base import BaseAPI
+from horizon_fastapi_template.utils import BaseAPI
 from ..errors import VaultError
 
 __all__ = ["VaultAPI"]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 from typing import Any, Dict, List
 
-from ..base import BaseAPI
+from horizon_fastapi_template.utils import BaseAPI
 from ..errors import GitError
 
 __all__ = ["GitAPI"]

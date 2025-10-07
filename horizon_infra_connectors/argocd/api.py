@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict
 
-from ..base import BaseAPI
+from horizon_fastapi_template.utils import BaseAPI
 from ..errors import ArgoCDError
 
 __all__ = ["ArgoCDAPI"]
