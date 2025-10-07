@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from ..base import BaseAPI
+from horizon_fastapi_template.utils import BaseAPI
 from ..errors import GitError
 
 __all__ = ["GitAPI"]
