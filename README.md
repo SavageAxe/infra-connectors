@@ -29,7 +29,7 @@ argo = ArgoCD(
 git = Git(
     base_url="https://api.bitbucket.org/2.0",
     token="token",
-    email="kingjohnny@example.com",
+    username_or_email="kingjohnny@example.com or kingJohnny",
     workspace="workspace",
     repo_slug="repo",
 )

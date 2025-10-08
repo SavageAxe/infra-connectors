@@ -42,7 +42,7 @@ def _generate_metadata_path(path: str) -> str:
 class VaultAPI:
     def __init__(self, base_url: str, token: str) -> None:
         headers = {"X-Vault-Token": token, "Content-Type": "application/json"}
-        self.api = BaseAPI(base_url.rstrip("/"), headers=headers)
+        self.api = BaseAPI(base_url.rstrip("/"), headers=headers).client
 
     async def read_secret(self, path: str) -> VaultSecretResponse:
         secret_path = _generate_secret_path(path)

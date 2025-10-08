@@ -57,7 +57,7 @@ class GitAPI:
 
     def __init__(self, base_url: str, token: str) -> None:
         headers = {"Authorization": f"Bearer {token}"}
-        self.api = BaseAPI(base_url.rstrip("/"), headers=headers)
+        self.api = BaseAPI(base_url.rstrip("/"), headers=headers).client
 
     async def get_file(self, path: str) -> GitFileContent:
         response = await self.api.get(f"/contents/{path.lstrip('/')}")

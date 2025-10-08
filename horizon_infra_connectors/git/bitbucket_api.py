@@ -113,7 +113,7 @@ class GitAPI:
             "Authorization": "Basic " + base64.b64encode(f"{username_or_email}:{token}".encode()).decode(),
             "Accept": "application/json",
         }
-        self.api = BaseAPI(base_url.rstrip("/"), headers=headers)
+        self.api = BaseAPI(base_url.rstrip("/"), headers=headers).client
         self.workspace, self.repo_slug, self._default_ref = workspace, repo_slug, default_ref
 
     async def get_file(self, path: str, ref: Optional[str] = None) -> GitFileContent:

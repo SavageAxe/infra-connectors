@@ -53,7 +53,7 @@ class ArgoCDAPI:
 
     def __init__(self, base_url: str, api_key: str) -> None:
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        self.api = BaseAPI(base_url.rstrip("/"), headers=headers)
+        self.api = BaseAPI(base_url.rstrip("/"), headers=headers).client
 
     async def sync_app(self, app_name: str) -> None:
         uri = f"/api/v1/applications/{app_name}/sync"
