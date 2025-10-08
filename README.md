@@ -27,14 +27,48 @@ argo = ArgoCD(
 )
 
 git = Git(
-    base_url="https://api.github.com/repos/org/repo",
+    base_url="https://api.bitbucket.org/2.0",
     token="token",
+    email="kingjohnny@example.com",
+    workspace="workspace",
+    repo_slug="repo",
 )
 
 vault = Vault(
     base_url="https://vault.example.com",
     token="token",
 )
+```
+
+Bitbucket is the default Git provider. To target GitHub instead, supply the `provider` argument:
+
+```python
+from horizon_infra_connectors import Git
+
+github = Git(
+    base_url="https://api.github.com/repos/org/repo",
+    token="github-token",
+    provider="github",
+)
+```
+
+### GitHub usage example
+
+```python
+import asyncio
+from horizon_infra_connectors import Git
+
+async def main() -> None:
+    github = Git(
+        base_url="https://api.github.com/repos/org/repo",
+        token="github-token",
+        provider="github",
+    )
+    await github.async_init()
+    readme_text = await github.get_file_content("README.md")
+    print(readme_text.splitlines()[0])
+
+asyncio.run(main())
 ```
 
 Each service exposes an underlying API client when you need lower-level control:
