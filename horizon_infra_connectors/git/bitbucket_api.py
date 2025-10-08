@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from horizon_fastapi_template.utils import BaseAPI
 from ..errors import GitError
+from .models import GitChangedFile, GitDirectoryEntry, GitFileContent
 
 __all__ = ["GitAPI"]
 
@@ -91,20 +92,19 @@ def _convert_commit(commit: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _convert_diffstat_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+def _convert_diffstat_entry(entry: Dict[str, Any]) -> GitChangedFile:
     if not isinstance(entry, dict):
-        return {}
+        return GitChangedFile()
     old, new = entry.get("old", {}), entry.get("new", {})
     filename = new.get("path") or old.get("path")
-    result = {
-        "filename": filename,
-        "status": entry.get("status"),
-        "additions": entry.get("lines_added", 0),
-        "deletions": entry.get("lines_removed", 0),
-    }
-    if old.get("path") and new.get("path") and old["path"] != new["path"]:
-        result["previous_filename"] = old["path"]
-    return result
+    previous = old.get("path") if old.get("path") and new.get("path") and old["path"] != new["path"] else None
+    return GitChangedFile(
+        filename=filename,
+        status=entry.get("status"),
+        additions=entry.get("lines_added", 0),
+        deletions=entry.get("lines_removed", 0),
+        previous_filename=previous,
+    )
 
 
 class GitAPI:
@@ -116,7 +116,7 @@ class GitAPI:
         self.api = BaseAPI(base_url.rstrip("/"), headers=headers)
         self.workspace, self.repo_slug, self._default_ref = workspace, repo_slug, default_ref
 
-    async def get_file(self, path: str, ref: Optional[str] = None) -> Dict[str, Any]:
+    async def get_file(self, path: str, ref: Optional[str] = None) -> GitFileContent:
         ref = ref or self._default_ref
         endpoint = _src_endpoint(self.workspace, self.repo_slug, ref, path)
         meta_response = await self.api.get(endpoint, params={"format": "meta"})
@@ -125,26 +125,37 @@ class GitAPI:
         raw_response = await self.api.get(endpoint, headers={"Accept": "application/octet-stream"})
         _handle_response(_safe_json(raw_response), raw_response.status_code)
         content_bytes = raw_response.content
-        return {
-            "type": "file",
-            "encoding": "base64",
-            "size": len(content_bytes),
-            "name": (meta_data.get("path", "").split("/")[-1]) if meta_data else path.split("/")[-1],
-            "path": meta_data.get("path") if meta_data else path.lstrip("/"),
-            "content": base64.b64encode(content_bytes).decode(),
-            "sha": _blob_sha(content_bytes),
-            "commit": _convert_commit(meta_data.get("commit", {})) if meta_data.get("commit") else None,
-        }
+        meta_path = meta_data.get("path") if isinstance(meta_data, dict) else None
+        commit = meta_data.get("commit") if isinstance(meta_data, dict) else None
+        return GitFileContent(
+            type="file",
+            encoding="base64",
+            size=len(content_bytes),
+            name=(meta_path or path).split("/")[-1],
+            path=meta_path or path.lstrip("/"),
+            content=base64.b64encode(content_bytes).decode(),
+            sha=_blob_sha(content_bytes),
+            commit=_convert_commit(commit or {}) if commit else None,
+        )
 
-    async def list_dir(self, path: str, ref: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def list_dir(self, path: str, ref: Optional[str] = None) -> List[GitDirectoryEntry]:
         ref = ref or self._default_ref
         response = await self.api.get(_src_endpoint(self.workspace, self.repo_slug, ref, path), params={"format": "meta"})
         data = _safe_json(response)
         _handle_response(data, response.status_code)
-        return [
-            {"name": e["path"].split("/")[-1], "path": e["path"], "type": "dir" if e.get("type") == "commit_directory" else "file"}
-            for e in data.get("values", []) if isinstance(e, dict) and e.get("path")
-        ]
+        entries: List[GitDirectoryEntry] = []
+        for e in data.get("values", []):
+            if not isinstance(e, dict) or not e.get("path"):
+                continue
+            entry_type = "dir" if e.get("type") == "commit_directory" else "file"
+            entries.append(
+                GitDirectoryEntry(
+                    name=e["path"].split("/")[-1],
+                    path=e["path"],
+                    type=entry_type,
+                )
+            )
+        return entries
 
     async def _commit_via_src(self, commit_message: str, *, files: Optional[Dict[str, bytes]], deleted: List[str], branch: Optional[str] = None) -> None:
         ref = branch or self._default_ref

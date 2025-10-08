@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Any, Mapping, Union
+
+from pydantic import BaseModel
 
 from horizon_fastapi_template.utils import BaseAPI
 from ..errors import VaultError
+from .models import VaultSecretPayload, VaultSecretResponse
 
 __all__ = ["VaultAPI"]
 
 
-def _safe_json(response) -> Dict:
+def _safe_json(response) -> Mapping[str, Any]:
     if not response.content:
         return {}
     try:
@@ -19,7 +22,7 @@ def _safe_json(response) -> Dict:
         return {}
 
 
-def _handle_response(response_json: Dict, status_code: int) -> None:
+def _handle_response(response_json: Mapping[str, Any], status_code: int) -> None:
     if status_code // 100 != 2:
         errors = response_json.get("errors")
         detail = f"Vault message: {errors}" if errors else "Vault request failed"
@@ -41,16 +44,26 @@ class VaultAPI:
         headers = {"X-Vault-Token": token, "Content-Type": "application/json"}
         self.api = BaseAPI(base_url.rstrip("/"), headers=headers)
 
-    async def read_secret(self, path: str) -> Dict:
+    async def read_secret(self, path: str) -> VaultSecretResponse:
         secret_path = _generate_secret_path(path)
         response = await self.api.get(f"/v1/{secret_path}")
         response_json = _safe_json(response)
         _handle_response(response_json, response.status_code)
-        return response_json
+        return VaultSecretResponse.model_validate(response_json)
 
-    async def write_secret(self, path: str, data: Dict) -> None:
+    async def write_secret(
+        self,
+        path: str,
+        data: Union[VaultSecretPayload, Mapping[str, Any], BaseModel],
+    ) -> None:
         secret_path = _generate_secret_path(path)
-        response = await self.api.post(f"/v1/{secret_path}", json={"data": data})
+        if isinstance(data, VaultSecretPayload):
+            payload = data
+        elif isinstance(data, BaseModel):
+            payload = VaultSecretPayload(data=data.model_dump(exclude_none=True))
+        else:
+            payload = VaultSecretPayload(data=dict(data))
+        response = await self.api.post(f"/v1/{secret_path}", json=payload.model_dump(exclude_none=True))
         response_json = _safe_json(response)
         _handle_response(response_json, response.status_code)
 

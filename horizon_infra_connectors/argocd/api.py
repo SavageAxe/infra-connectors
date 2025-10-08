@@ -3,22 +3,27 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any, Mapping, Union
+
+from pydantic import BaseModel
 
 from horizon_fastapi_template.utils import BaseAPI
 from ..errors import ArgoCDError
+from .models import ArgoApplication
 
 __all__ = ["ArgoCDAPI"]
 
 
-def _parse_response_message(response_json: Dict[str, Any]) -> str | None:
+def _parse_response_message(response_json: Mapping[str, Any]) -> str | None:
     message = response_json.get("message")
-    if isinstance(message, dict):
+    if isinstance(message, Mapping):
         return json.dumps(message)
-    return message
+    if isinstance(message, str):
+        return message
+    return None
 
 
-def _handle_response(response_json: Dict[str, Any], status_code: int) -> None:
+def _handle_response(response_json: Mapping[str, Any], status_code: int) -> None:
     message = _parse_response_message(response_json)
 
     if status_code == 307:
@@ -57,21 +62,32 @@ class ArgoCDAPI:
         response_json = response.json()
         _handle_response(response_json, response.status_code)
 
-    async def get_app(self, app_name: str) -> Dict[str, Any]:
+    async def get_app(self, app_name: str) -> ArgoApplication:
         uri = f"/api/v1/applications/{app_name}"
 
         response = await self.api.get(endpoint=uri)
         response_json = response.json()
         _handle_response(response_json, response.status_code)
-        return response_json
+        return ArgoApplication.model_validate(response_json)
 
-    async def patch_app(self, app_definition: Dict[str, Any], app_name: str, namespace: str, project: str) -> None:
+    async def patch_app(
+        self,
+        app_definition: Union[ArgoApplication, Mapping[str, Any], BaseModel],
+        app_name: str,
+        namespace: str,
+        project: str,
+    ) -> None:
         uri = f"/api/v1/applications/{app_name}"
+
+        if isinstance(app_definition, BaseModel):
+            patch_payload = app_definition.model_dump(exclude_none=True)
+        else:
+            patch_payload = dict(app_definition)
 
         data = {
             "appNamespace": namespace,
             "name": app_name,
-            "patch": json.dumps(app_definition),
+            "patch": json.dumps(patch_payload),
             "patchType": "merge",
             "project": project,
         }

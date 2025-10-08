@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 
 from horizon_fastapi_template.utils import BaseAPI
 from ..errors import GitError
+from .models import GitDirectoryEntry, GitFileContent
 
 __all__ = ["GitAPI"]
 
@@ -58,18 +59,19 @@ class GitAPI:
         headers = {"Authorization": f"Bearer {token}"}
         self.api = BaseAPI(base_url.rstrip("/"), headers=headers)
 
-    async def get_file(self, path: str) -> Dict[str, Any]:
+    async def get_file(self, path: str) -> GitFileContent:
         response = await self.api.get(f"/contents/{path.lstrip('/')}")
         response_json = _safe_json(response)
         _handle_response(response_json, response.status_code)
-        return response_json
+        return GitFileContent.model_validate(response_json)
 
     async def delete_file(self, path: str, commit_message: str) -> None:
         data = await self.get_file(path)
-        sha = data["sha"]
+        if not data.sha:
+            raise GitError(status_code=404, detail=f"Missing SHA for {path}")
 
         payload = {
-            "sha": sha,
+            "sha": data.sha,
             "message": commit_message,
             "branch": "main",
         }
@@ -80,12 +82,13 @@ class GitAPI:
 
     async def modify_file_content(self, path: str, commit_message: str, content: str) -> None:
         file = await self.get_file(path)
-        sha = file["sha"]
+        if not file.sha:
+            raise GitError(status_code=404, detail=f"Missing SHA for {path}")
 
         encoded_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
 
         payload = {
-            "sha": sha,
+            "sha": file.sha,
             "content": encoded_content,
             "message": commit_message,
         }
@@ -94,11 +97,13 @@ class GitAPI:
         response_json = _safe_json(response)
         _handle_response(response_json, response.status_code)
 
-    async def list_dir(self, path: str) -> List[Dict[str, Any]]:
+    async def list_dir(self, path: str) -> List[GitDirectoryEntry]:
         response = await self.api.get(f"/contents/{path.lstrip('/')}")
         response_json = _safe_json(response)
         _handle_response(response_json, response.status_code)
-        return response_json if isinstance(response_json, list) else []
+        if not isinstance(response_json, list):
+            return []
+        return [GitDirectoryEntry.model_validate(item) for item in response_json]
 
     async def create_new_file(self, path: str, commit_message: str, content: str) -> None:
         encoded_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")

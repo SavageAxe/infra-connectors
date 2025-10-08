@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import base64
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Iterable, List, Optional, Sequence, Tuple, Union
 
 from loguru import logger
 
 from .api import GitAPI as GithubAPI
 from .bitbucket_api import GitAPI as BitbucketAPI
+from .models import GitChangedFile, GitDirectoryEntry, GitFileContent
 from ..errors import GitError
 
 __all__ = ["Git", "logger"]
@@ -114,17 +115,25 @@ class Git:
     async def get_file_content(self, path: str, ref: Optional[str] = None, encoding: str = "utf-8") -> str:
         logger.debug("Fetching text for path={} (ref={}) from provider={}.", path, ref or self.default_ref, self.provider)
         meta = await self._get_file(path, ref=ref)
-        return base64.b64decode(meta["content"]).decode(encoding)
+        if not meta.content:
+            raise GitError(status_code=500, detail=f"File {path} missing content on provider {self.provider}")
+        return base64.b64decode(meta.content).decode(encoding)
 
     async def get_file_bytes(self, path: str, ref: Optional[str] = None) -> bytes:
         logger.debug("Fetching bytes for path={} (ref={}) from provider={}.", path, ref or self.default_ref, self.provider)
         meta = await self._get_file(path, ref=ref)
-        return base64.b64decode(meta["content"])
+        if not meta.content:
+            raise GitError(status_code=500, detail=f"File {path} missing content on provider {self.provider}")
+        return base64.b64decode(meta.content)
 
     async def list_dir(self, path: str, ref: Optional[str] = None) -> List[Tuple[str, str]]:
         logger.debug("Listing directory path={} (ref={}) on provider={}.", path or "/", ref or self.default_ref, self.provider)
         items = await self._list_dir_raw(path, ref=ref)
-        return [(item.get("name", ""), item.get("path", "")) for item in items if item.get("name") and item.get("path")]
+        return [
+            (item.name or "", item.path or "")
+            for item in items
+            if (item.name or "") and (item.path or "")
+        ]
 
     async def list_files_recursive(self, path: str = "", ref: Optional[str] = None) -> List[str]:
         logger.debug("Listing files recursively from path={} (ref={}) on provider={}.", path or "/", ref or self.default_ref, self.provider)
@@ -138,8 +147,8 @@ class Git:
             current = stack.pop()
             entries = await self._list_dir_raw(current, ref=ref)
             for entry in entries:
-                entry_type = entry.get("type")
-                entry_path = entry.get("path")
+                entry_type = (entry.type or "").lower()
+                entry_path = entry.path or ""
                 if not entry_path:
                     continue
                 if entry_type == "dir":
@@ -149,7 +158,7 @@ class Git:
 
         return sorted(set(files))
 
-    async def get_changed_files(self, path: str, since: str, until: str) -> List[Dict[str, Any]]:
+    async def get_changed_files(self, path: str, since: str, until: str) -> List[GitChangedFile]:
         logger.debug(
             "Fetching changed files for path={} between {} and {} on provider={}.",
             path,
@@ -166,7 +175,7 @@ class Git:
             logger.debug("No commits found for path={} in window {}-{} on provider={}.", path, since, until, self.provider)
             return []
 
-        def _commit_date(commit: Dict[str, Any]) -> str:
+        def _commit_date(commit: dict) -> str:
             commit_meta = commit.get("commit", {}) if isinstance(commit, dict) else {}
             author = commit_meta.get("author", {}) if isinstance(commit_meta, dict) else {}
             return author.get("date") or ""
@@ -185,7 +194,18 @@ class Git:
         logger.debug("Comparing commits base={} head={} for path={} on provider={}.", base, head, path, self.provider)
         diff = await self.api.compare_commits(base, head)
         self.last_commit = head
-        return diff.get("files", []) if isinstance(diff, dict) else []
+        files_raw = diff.get("files", []) if isinstance(diff, dict) else []
+
+        files: List[GitChangedFile] = []
+        for item in files_raw:
+            if isinstance(item, GitChangedFile):
+                files.append(item)
+            elif isinstance(item, dict):
+                try:
+                    files.append(GitChangedFile.model_validate(item))
+                except Exception:
+                    logger.debug("Skipping diff entry due to validation error: {}", item)
+        return files
 
     def commit_context(self, message: str = "Commit via context", branch: Optional[str] = None):
         if hasattr(self.api, "commit_context"):
@@ -225,12 +245,12 @@ class Git:
         )
         raise GitError(status_code=409, detail=f"File {path} already exists on {self.provider}")
 
-    async def _get_file(self, path: str, ref: Optional[str]) -> Dict[str, Any]:
+    async def _get_file(self, path: str, ref: Optional[str]) -> GitFileContent:
         if self.provider == "bitbucket":
             return await self.api.get_file(path, ref=ref)
         return await self.api.get_file(path)
 
-    async def _list_dir_raw(self, path: str, ref: Optional[str]) -> Iterable[Dict[str, Any]]:
+    async def _list_dir_raw(self, path: str, ref: Optional[str]) -> Sequence[GitDirectoryEntry]:
         if self.provider == "bitbucket":
             return await self.api.list_dir(path, ref=ref)
         return await self.api.list_dir(path)

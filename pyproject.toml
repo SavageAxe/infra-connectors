@@ -16,7 +16,9 @@ dependencies = [
     "fastapi>=0.95",
     "httpx>=0.24",
     "loguru>=0.7",
-    "pyyaml>=6.0.3"
+    "pyyaml>=6.0.3",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0"
 ]
 
 [tool.setuptools.packages.find]
