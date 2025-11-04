@@ -6,7 +6,7 @@ import base64
 import hashlib
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from horizon_fastapi_template.utils import BaseAPI
 from ..errors import GitError
@@ -48,11 +48,23 @@ def _blob_sha(content: bytes) -> str:
     return hashlib.sha1(header + content).hexdigest()
 
 
-def _src_endpoint(workspace: str, repo_slug: str, ref: str, path: str) -> str:
+def _cloud_src_endpoint(workspace: str, repo_slug: str, ref: str, path: str) -> str:
     clean = path.lstrip("/")
     if clean:
         return f"/repositories/{workspace}/{repo_slug}/src/{ref}/{clean}"
     return f"/repositories/{workspace}/{repo_slug}/src/{ref}"
+
+
+def _server_browse_endpoint(project_key: str, repo_slug: str, path: str) -> str:
+    clean = path.lstrip("/")
+    if clean:
+        return f"/projects/{project_key}/repos/{repo_slug}/browse/{clean}"
+    return f"/projects/{project_key}/repos/{repo_slug}/browse"
+
+
+def _server_files_endpoint(project_key: str, repo_slug: str, path: str) -> str:
+    clean = path.lstrip("/")
+    return f"/projects/{project_key}/repos/{repo_slug}/files/{clean}"
 
 
 def _parse_author(author: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
@@ -108,17 +120,66 @@ def _convert_diffstat_entry(entry: Dict[str, Any]) -> GitChangedFile:
 
 
 class GitAPI:
-    def __init__(self, base_url: str, username_or_email: str, token: str, workspace: str, repo_slug: str, default_ref: str = "main") -> None:
+    def __init__(
+        self,
+        base_url: str,
+        username_or_email: str,
+        token: str,
+        workspace: Optional[str],
+        repo_slug: str,
+        default_ref: str = "main",
+        *,
+        project_key: Optional[str] = None,
+        is_server: bool = False,
+    ) -> None:
         headers = {
             "Authorization": "Basic " + base64.b64encode(f"{username_or_email}:{token}".encode()).decode(),
             "Accept": "application/json",
         }
         self.api = BaseAPI(base_url.rstrip("/"), headers=headers).client
-        self.workspace, self.repo_slug, self._default_ref = workspace, repo_slug, default_ref
+        self.repo_slug, self._default_ref = repo_slug, default_ref
+        self.is_server = is_server
+        self.workspace = workspace
+        self.project_key = project_key
+
+        if self.is_server:
+            if not self.project_key:
+                raise ValueError("Bitbucket Server requires a project_key")
+        else:
+            if not self.workspace:
+                raise ValueError("Bitbucket Cloud requires a workspace")
 
     async def get_file(self, path: str, ref: Optional[str] = None) -> GitFileContent:
         ref = ref or self._default_ref
-        endpoint = _src_endpoint(self.workspace, self.repo_slug, ref, path)
+        if self.is_server:
+            endpoint = _server_browse_endpoint(self.project_key, self.repo_slug, path)
+            params = {"at": ref}
+            meta_response = await self.api.get(endpoint, params=params)
+            meta_data = _safe_json(meta_response)
+            _handle_response(meta_data, meta_response.status_code)
+            raw_params = {"at": ref, "raw": 1}
+            raw_response = await self.api.get(endpoint, params=raw_params, headers={"Accept": "application/octet-stream"})
+            _handle_response(_safe_json(raw_response), raw_response.status_code)
+            content_bytes = raw_response.content
+            path_meta = meta_data.get("path") if isinstance(meta_data, dict) else {}
+            if isinstance(path_meta, dict):
+                components = path_meta.get("components") if isinstance(path_meta.get("components"), list) else None
+                meta_path = path_meta.get("toString") or "/".join(components or [])
+                meta_name = path_meta.get("name")
+            else:
+                meta_path = None
+                meta_name = None
+            return GitFileContent(
+                type="file",
+                encoding="base64",
+                size=len(content_bytes),
+                name=meta_name or (meta_path or path).split("/")[-1],
+                path=(meta_path or path).lstrip("/"),
+                content=base64.b64encode(content_bytes).decode(),
+                sha=_blob_sha(content_bytes),
+            )
+
+        endpoint = _cloud_src_endpoint(self.workspace, self.repo_slug, ref, path)
         meta_response = await self.api.get(endpoint, params={"format": "meta"})
         meta_data = _safe_json(meta_response)
         _handle_response(meta_data, meta_response.status_code)
@@ -140,7 +201,44 @@ class GitAPI:
 
     async def list_dir(self, path: str, ref: Optional[str] = None) -> List[GitDirectoryEntry]:
         ref = ref or self._default_ref
-        response = await self.api.get(_src_endpoint(self.workspace, self.repo_slug, ref, path), params={"format": "meta"})
+        if self.is_server:
+            endpoint = _server_browse_endpoint(self.project_key, self.repo_slug, path)
+            response = await self.api.get(endpoint, params={"at": ref})
+            data = _safe_json(response)
+            _handle_response(data, response.status_code)
+            children = {}
+            if isinstance(data, dict):
+                children = data.get("children", {}) or {}
+            values: Iterable[Dict[str, Any]] = []
+            if isinstance(children, dict):
+                raw_values = children.get("values")
+                if isinstance(raw_values, list):
+                    values = raw_values
+            entries: List[GitDirectoryEntry] = []
+            for entry in values:
+                if not isinstance(entry, dict):
+                    continue
+                path_meta = entry.get("path")
+                if isinstance(path_meta, dict):
+                    components = path_meta.get("components") if isinstance(path_meta.get("components"), list) else None
+                    entry_path = path_meta.get("toString") or "/".join(components or [])
+                else:
+                    entry_path = path_meta
+                if not entry_path:
+                    continue
+                entry_type = (entry.get("type") or "").lower()
+                entries.append(
+                    GitDirectoryEntry(
+                        name=entry_path.split("/")[-1],
+                        path=entry_path,
+                        type="dir" if entry_type == "directory" else "file",
+                    )
+                )
+            return entries
+
+        response = await self.api.get(
+            _cloud_src_endpoint(self.workspace, self.repo_slug, ref, path), params={"format": "meta"}
+        )
         data = _safe_json(response)
         _handle_response(data, response.status_code)
         entries: List[GitDirectoryEntry] = []
@@ -157,8 +255,19 @@ class GitAPI:
             )
         return entries
 
-    async def _commit_via_src(self, commit_message: str, *, files: Optional[Dict[str, bytes]], deleted: List[str], branch: Optional[str] = None) -> None:
+    async def _commit(
+        self,
+        commit_message: str,
+        *,
+        files: Optional[Dict[str, bytes]],
+        deleted: List[str],
+        branch: Optional[str] = None,
+    ) -> None:
         ref = branch or self._default_ref
+        if self.is_server:
+            await self._commit_server(commit_message, files=files, deleted=deleted, branch=ref)
+            return
+
         data: Dict[str, Any] = {"message": commit_message, "branch": ref}
         if deleted:
             data["files"] = [d.lstrip("/") for d in deleted]
@@ -182,12 +291,40 @@ class GitAPI:
         )
         _handle_response(_safe_json(response), response.status_code)
 
+    async def _commit_server(
+        self,
+        commit_message: str,
+        *,
+        files: Optional[Dict[str, bytes]],
+        deleted: List[str],
+        branch: str,
+    ) -> None:
+        for path, content in (files or {}).items():
+            endpoint = _server_files_endpoint(self.project_key, self.repo_slug, path)
+            response = await self.api.post(
+                endpoint,
+                data={"message": commit_message, "branch": branch},
+                files={
+                    "content": (
+                        Path(path).name,
+                        content,
+                        "application/octet-stream",
+                    )
+                },
+            )
+            _handle_response(_safe_json(response), response.status_code)
+
+        for path in deleted:
+            endpoint = _server_files_endpoint(self.project_key, self.repo_slug, path)
+            response = await self.api.delete(endpoint, params={"message": commit_message, "branch": branch})
+            _handle_response(_safe_json(response), response.status_code)
+
     async def create_or_update_file(self, path: str, commit_message: str, content: Union[str, bytes], branch: Optional[str] = None) -> None:
         data_bytes = content.encode() if isinstance(content, str) else content
-        await self._commit_via_src(commit_message, files={path: data_bytes}, deleted=[], branch=branch)
+        await self._commit(commit_message, files={path: data_bytes}, deleted=[], branch=branch)
 
     async def delete_file(self, path: str, commit_message: str, branch: Optional[str] = None) -> None:
-        await self._commit_via_src(commit_message, files=None, deleted=[path], branch=branch)
+        await self._commit(commit_message, files=None, deleted=[path], branch=branch)
 
     class CommitContext:
         def __init__(self, api: "GitAPI", message: str = "Commit via context", branch: Optional[str] = None):
@@ -196,7 +333,7 @@ class GitAPI:
         async def __aenter__(self): return self
         async def __aexit__(self, exc_type, exc, tb):
             if exc_type is None:
-                await self.api._commit_via_src(self.message, files=self.files or None, deleted=self.deleted, branch=self.branch)
+                await self.api._commit(self.message, files=self.files or None, deleted=self.deleted, branch=self.branch)
         def add_or_edit_file(self, path: str, content: Union[str, bytes]):
             self.files[path] = content.encode() if isinstance(content, str) else content
         def delete_file(self, path: str):

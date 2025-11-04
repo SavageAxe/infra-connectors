@@ -27,9 +27,11 @@ class Git:
         email: Optional[str] = None,
         workspace: Optional[str] = None,
         repo_slug: Optional[str] = None,
+        project_key: Optional[str] = None,
         default_ref: str = "main",
         *,
         provider: ProviderLiteral = None,
+        bitbucket_server: bool = False,
     ) -> None:
         provider_name = (provider or "bitbucket").lower()
 
@@ -37,15 +39,33 @@ class Git:
             logger.debug("Initialising Git service with GitHub provider: base_url={}.", base_url)
             self.api = GithubAPI(base_url, token)
         elif provider_name == "bitbucket":
-            if not all([email, workspace, repo_slug]):
-                raise ValueError("Bitbucket provider requires email, workspace, and repo_slug")
+            required_fields = [email, repo_slug]
+            if bitbucket_server:
+                required_fields.append(project_key)
+            else:
+                required_fields.append(workspace)
+            if not all(required_fields):
+                raise ValueError(
+                    "Bitbucket provider requires email, repo_slug, and workspace (cloud) or project_key (server)"
+                )
             logger.debug(
-                "Initialising Git service with Bitbucket provider: base_url={}, workspace={}, repo_slug={}.",
+                "Initialising Git service with Bitbucket provider: base_url={}, workspace={}, project_key={}, repo_slug={}, server={}",
                 base_url,
                 workspace,
+                project_key,
                 repo_slug,
+                bitbucket_server,
             )
-            self.api = BitbucketAPI(base_url, email, token, workspace, repo_slug, default_ref)
+            self.api = BitbucketAPI(
+                base_url,
+                email,
+                token,
+                workspace,
+                repo_slug,
+                default_ref,
+                project_key=project_key,
+                is_server=bitbucket_server,
+            )
         else:
             raise ValueError(f"Unsupported git provider: {provider_name}")
 
