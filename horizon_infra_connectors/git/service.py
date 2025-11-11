@@ -25,11 +25,15 @@ class Git:
         base_url: str,
         token: str,
         email: Optional[str] = None,
+        username_or_email: Optional[str] = None,
         workspace: Optional[str] = None,
         repo_slug: Optional[str] = None,
+        project_key: Optional[str] = None,
         default_ref: str = "main",
         *,
         provider: ProviderLiteral = None,
+        bitbucket_server: bool = False,
+        bitbucket_http_token: bool = False,
     ) -> None:
         provider_name = (provider or "bitbucket").lower()
 
@@ -37,15 +41,39 @@ class Git:
             logger.debug("Initialising Git service with GitHub provider: base_url={}.", base_url)
             self.api = GithubAPI(base_url, token)
         elif provider_name == "bitbucket":
-            if not all([email, workspace, repo_slug]):
-                raise ValueError("Bitbucket provider requires email, workspace, and repo_slug")
+            identity = username_or_email or email
+            if email and username_or_email and email != username_or_email:
+                raise ValueError("Conflicting email and username_or_email values provided")
+            required_fields = [repo_slug]
+            if not bitbucket_http_token:
+                required_fields.append(identity)
+            if bitbucket_server:
+                required_fields.append(project_key)
+            else:
+                required_fields.append(workspace)
+            if not all(required_fields):
+                raise ValueError(
+                    "Bitbucket provider requires repo_slug and workspace (cloud) or project_key (server); provide username_or_email unless using bitbucket_http_token"
+                )
             logger.debug(
-                "Initialising Git service with Bitbucket provider: base_url={}, workspace={}, repo_slug={}.",
+                "Initialising Git service with Bitbucket provider: base_url={}, workspace={}, project_key={}, repo_slug={}, server={}",
                 base_url,
                 workspace,
+                project_key,
                 repo_slug,
+                bitbucket_server,
             )
-            self.api = BitbucketAPI(base_url, email, token, workspace, repo_slug, default_ref)
+            self.api = BitbucketAPI(
+                base_url,
+                identity,
+                token,
+                workspace,
+                repo_slug,
+                default_ref,
+                project_key=project_key,
+                is_server=bitbucket_server,
+                use_http_token=bitbucket_http_token,
+            )
         else:
             raise ValueError(f"Unsupported git provider: {provider_name}")
 

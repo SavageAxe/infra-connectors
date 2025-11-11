@@ -50,7 +50,48 @@ github = Git(
     token="github-token",
     provider="github",
 )
+
+bitbucket_server = Git(
+    base_url="https://bitbucket.example.com",
+    token="token",
+    username_or_email="service-user",
+    repo_slug="repo",
+    project_key="OPS",
+    bitbucket_server=True,
+)
+
+bitbucket_server_http_token = Git(
+    base_url="https://bitbucket.example.com",
+    token="http-access-token",
+    repo_slug="repo",
+    project_key="OPS",
+    bitbucket_server=True,
+    bitbucket_http_token=True,
+)
+# Bitbucket Server requires HTTP access tokens that belong to a user account
+# for write operations; repository- or project-scoped tokens cannot edit files.
+
+### Bitbucket Server curl example
+
+To call the Bitbucket Server REST API directly, issue a `PUT` request to the
+files endpoint with multipart form fields for the commit metadata and the file
+contents. The snippet below mirrors what the client sends when creating or
+updating a file:
+
+```bash
+curl \
+  -H "Authorization: Bearer ${HTTP_ACCESS_TOKEN}" \
+  -X PUT "https://bitbucket.example.com/rest/api/1.0/projects/OPS/repos/repo/files/path/to/file.txt" \
+  -F message="Automated update" \
+  -F branch=main \
+  -F content=@/absolute/path/to/local/file.txt
 ```
+
+* Replace `${HTTP_ACCESS_TOKEN}` with a Bitbucket Server HTTP access token that belongs to a user account. Tokens created at the repository or project level do not include user identity and will be rejected for file edits. To use Basic auth instead, pass `-u "user:token"` rather than the `Authorization` header.
+* Update the project key, repository slug, and file path for your repository.
+* Include the `branch` field when committing to a non-default branch.
+* `content` can reference a local file; to provide inline content, pipe text via
+  process substitution (for example, `-F "content=< <(printf 'hello')"`).
 
 ### GitHub usage example
 
